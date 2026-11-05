@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Sidebar from "./components/Sidebar";
 import TabBar from "./components/TabBar";
@@ -8,23 +8,59 @@ import StatusBar from "./components/StatusBar";
 import Welcome from "./components/Welcome";
 import VoiceController from "./components/VoiceController";
 import RightPanel from "./components/RightPanel";
+import { createSaver } from "./fileSaver";
+
+const WELCOME_TAB = { id: "welcome", title: "Welcome", type: "welcome" };
+
+function createModel(id, content) {
+  // A fixed address per tab lets the editor attach to this exact model.
+  return monaco.editor.createModel(
+    content,
+    "python",
+    monaco.Uri.from({ scheme: "codevox", path: `/${id}` })
+  );
+}
+
+function findFile(nodes, name) {
+  const wanted = name.toLowerCase();
+  for (const node of nodes) {
+    if (node.type === "file" && [node.name, node.path].some((n) => n.toLowerCase() === wanted)) {
+      return node;
+    }
+    const inside = node.children && findFile(node.children, name);
+    if (inside) return inside;
+  }
+  return null;
+}
 
 export default function App() {
-  const [tabs, setTabs] = useState([
-    { id: "welcome", title: "Welcome", type: "welcome" },
-  ]);
+  const [tabs, setTabs] = useState([WELCOME_TAB]);
   const [activeTab, setActiveTab] = useState("welcome");
   const [models, setModels] = useState({});
-  const [outline, setOutline] = useState([]);
 
   const editorRef = useRef(null);
   const terminalRef = useRef(null);
+  const saversRef = useRef({});
+  const openingRef = useRef(new Set());
+  const treeRef = useRef([]);
+  const untitledCountRef = useRef(0);
+
+  // Warn before the page closes if the last edits have not reached the disk yet.
+  useEffect(() => {
+    const warn = (e) => {
+      if (Object.values(saversRef.current).some((s) => s.hasUnsavedChanges())) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
 
   /* ================= OPEN FOLDER ================= */
 
   const handleOpenFolder = async () => {
     try {
-      const root = await window.showDirectoryPicker();
+      const root = await window.showDirectoryPicker({ mode: "readwrite" });
       if (!root) return;
 
       window.dispatchEvent(
@@ -34,34 +70,40 @@ export default function App() {
       );
     } catch (err) {
       if (err.name !== "AbortError") {
-        console.error(err);
+        terminalRef.current?.printError(err.message || String(err));
       }
     }
   };
 
+  // Tabs are named by relative path, so tabs from the old folder must not survive:
+  // the same path in the new folder would otherwise open and save the old file.
+  const closeAllTabs = async () => {
+    await Promise.all(Object.values(saversRef.current).map((s) => s.flush()));
+    saversRef.current = {};
+    Object.values(models).forEach((model) => model.dispose());
+    setModels({});
+    setTabs([WELCOME_TAB]);
+    setActiveTab("welcome");
+  };
+
   /* ================= CLOSE TAB ================= */
 
-  const closeTab = (id) => {
+  const closeTab = async (id) => {
     if (id === "welcome") return;
 
-    if (models[id]) models[id].dispose();
-
+    // Decide the next tab now, so the editor moves off this model before it is disposed.
+    const remaining = tabs.filter((t) => t.id !== id);
+    setTabs(remaining);
+    if (activeTab === id) setActiveTab(remaining[remaining.length - 1].id);
     setModels((prev) => {
       const copy = { ...prev };
       delete copy[id];
       return copy;
     });
 
-    setTabs((prev) => {
-      const remaining = prev.filter((t) => t.id !== id);
-      const next = remaining.length
-        ? remaining[remaining.length - 1].id
-        : "welcome";
-      setActiveTab(next);
-      return remaining.length
-        ? remaining
-        : [{ id: "welcome", title: "Welcome", type: "welcome" }];
-    });
+    await saversRef.current[id]?.flush();
+    delete saversRef.current[id];
+    setTimeout(() => models[id]?.dispose(), 0);
   };
 
   /* ================= OPEN FILE ================= */
@@ -71,92 +113,111 @@ export default function App() {
       setActiveTab(path);
       return;
     }
+    // A double click starts two opens before the first one has finished.
+    if (openingRef.current.has(path)) return;
+    openingRef.current.add(path);
 
-    const file = await fileHandle.getFile();
-    const content = await file.text();
+    try {
+      const file = await fileHandle.getFile();
+      const content = await file.text();
+      const model = createModel(path, content);
+      const saver = createSaver(fileHandle, (err) =>
+        terminalRef.current?.printError(`Could not save ${path}: ${err.message || err}`)
+      );
+      saversRef.current[path] = saver;
 
-    const model = monaco.editor.createModel(content, "python");
+      model.onDidChangeContent(() => saver.save(model.getValue()));
 
-    model.onDidChangeContent(() => {
-      handleEditorContentChange(model.getValue());
-      saveFile(fileHandle, model.getValue());
-    });
+      setModels((prev) => ({ ...prev, [path]: model }));
+      setTabs((prev) => [
+        ...prev,
+        { id: path, title: path.split("/").pop(), type: "editor" },
+      ]);
+      setActiveTab(path);
+    } catch (err) {
+      terminalRef.current?.printError(`Could not open ${path}: ${err.message || err}`);
+    } finally {
+      openingRef.current.delete(path);
+    }
+  };
 
-    setModels((prev) => ({ ...prev, [path]: model }));
+  const openFileByName = async (name) => {
+    const node = findFile(treeRef.current, name);
+    if (!node) return false;
+    await openFile(node.path, node.handle);
+    return true;
+  };
 
+  /* ================= UNTITLED ================= */
+
+  // Lets voice work before any folder is open. Untitled text is never written to disk.
+  const openUntitled = () => {
+    untitledCountRef.current += 1;
+    const id = `untitled-${untitledCountRef.current}`;
+    const model = createModel(id, "");
+    setModels((prev) => ({ ...prev, [id]: model }));
     setTabs((prev) => [
       ...prev,
-      { id: path, title: path.split("/").pop(), type: "editor" },
+      { id, title: `Untitled ${untitledCountRef.current}`, type: "editor" },
     ]);
-
-    setActiveTab(path);
+    setActiveTab(id);
+    return model;
   };
 
-  const saveFile = async (fileHandle, content) => {
-    try {
-      const writable = await fileHandle.createWritable();
-      await writable.write(content);
-      await writable.close();
-    } catch {}
-  };
-
-  /* ================= OUTLINE ================= */
-
-  const handleEditorContentChange = useCallback((text) => {
-    const lines = text.split("\n");
-    const items = [];
-
-    lines.forEach((line, i) => {
-      const ln = line.trim();
-      if (ln.startsWith("def ")) {
-        items.push({
-          type: "function",
-          name: ln.split("(")[0].replace("def ", ""),
-          line: i + 1,
-        });
-      }
-      if (ln.startsWith("class ")) {
-        items.push({
-          type: "class",
-          name: ln.split("(")[0].replace("class ", ""),
-          line: i + 1,
-        });
-      }
-    });
-
-    setOutline(items);
-  }, []);
-
-  /* ================= RUN CODE (FIXED) ================= */
-
-  const runCode = async () => {
-  if (!editorRef.current) return;
-
-  const rawCode = editorRef.current.getValue();
-
-  terminalRef.current?.clear();
-  terminalRef.current?.printCommand("Running...");
-
-  await fetch("http://localhost:5000/api/run-code", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code: rawCode }),
-  });
-};
-
-  /* ================= CURRENT TAB ================= */
+  /* ================= RUN CODE ================= */
 
   const currentTab = tabs.find((t) => t.id === activeTab);
   const currentModel =
-    activeTab !== "welcome" ? models[activeTab] : null;
+    activeTab !== "welcome" ? models[activeTab] || null : null;
+
+  const runCode = async () => {
+    if (!currentModel) {
+      terminalRef.current?.printError("Nothing to run. Open a file first.");
+      return;
+    }
+
+    terminalRef.current?.clear();
+    terminalRef.current?.printCommand("Running...");
+
+    try {
+      const res = await fetch("http://localhost:5000/api/run-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: currentModel.getValue() }),
+      });
+      const data = await res.json();
+      if (data.error) terminalRef.current?.printError(data.error);
+    } catch (err) {
+      terminalRef.current?.printError(err.message || String(err));
+    }
+  };
+
+  const stopProgram = async () => {
+    try {
+      const res = await fetch("http://localhost:5000/api/stop", { method: "POST" });
+      const data = await res.json();
+      terminalRef.current?.announce(
+        data.stopped ? "Program stopped." : "No program is running."
+      );
+    } catch (err) {
+      terminalRef.current?.printError(err.message || String(err));
+    }
+  };
 
   /* ================= UI ================= */
 
   return (
     <div className="h-screen flex bg-[#181818] text-gray-200">
-      <Sidebar onOpenFile={openFile} onRun={runCode} />
+      <Sidebar
+        onOpenFile={openFile}
+        onRun={runCode}
+        onFolderChanged={closeAllTabs}
+        onTreeChanged={(tree) => {
+          treeRef.current = tree;
+        }}
+      />
 
-      <div className="flex-1 flex flex-col">
+      <main className="flex-1 flex flex-col min-w-0">
         <TabBar
           tabs={tabs}
           activeTab={activeTab}
@@ -165,37 +226,33 @@ export default function App() {
         />
 
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 flex flex-col border-r border-gray-700">
+          <div className="flex-1 flex flex-col border-r border-gray-700 min-w-0">
             <div className="flex-1 bg-[#1e1e1e] relative">
-              {currentTab?.type === "welcome" ? (
+              {currentTab?.type === "welcome" || !currentModel ? (
                 <Welcome onOpenFolder={handleOpenFolder} />
               ) : (
-                <Editor
-                  key={activeTab}
-                  ref={editorRef}
-                  model={currentModel}
-                />
+                <Editor ref={editorRef} model={currentModel} />
               )}
 
               <VoiceController
                 editorRef={editorRef}
                 terminalRef={terminalRef}
+                currentModel={currentModel}
                 onRunRequested={runCode}
+                onStopRequested={stopProgram}
+                onOpenFileRequested={openFileByName}
+                onUntitledRequested={openUntitled}
               />
             </div>
 
             <Terminal ref={terminalRef} />
           </div>
 
-          <RightPanel
-            outline={outline}
-            editorRef={editorRef}
-            model={currentModel}
-          />
+          <RightPanel editorRef={editorRef} model={currentModel} />
         </div>
 
-        <StatusBar onRun={runCode} />
-      </div>
+        <StatusBar onRun={runCode} onStop={stopProgram} />
+      </main>
     </div>
   );
 }

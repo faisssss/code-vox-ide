@@ -7,24 +7,29 @@ export default function TabBar({ tabs, activeTab, onSetActive, onClose }) {
       {tabs.map((tab) => (
         <div
           key={tab.id}
-          onClick={() => onSetActive(tab.id)}
-          className={`flex items-center px-3 py-1 cursor-pointer transition ${
+          className={`flex items-center px-1 transition ${
             activeTab === tab.id
               ? "bg-[#1b1b1b] text-white"
               : "hover:bg-[#2d2d2d]"
           }`}
         >
-          <span className="mr-2 truncate max-w-[120px]">{tab.title}</span>
-
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose(tab.id);
-            }}
-            className="hover:text-white"
+            onClick={() => onSetActive(tab.id)}
+            aria-current={activeTab === tab.id ? "page" : undefined}
+            className="bg-transparent truncate max-w-[140px]"
           >
-            <VscClose size={14} />
+            {tab.title}
           </button>
+
+          {tab.id !== "welcome" && (
+            <button
+              onClick={() => onClose(tab.id)}
+              aria-label={`Close ${tab.title}`}
+              className="bg-transparent hover:text-white"
+            >
+              <VscClose size={14} />
+            </button>
+          )}
         </div>
       ))}
     </div>

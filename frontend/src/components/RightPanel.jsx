@@ -1,8 +1,10 @@
 // src/components/RightPanel.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { parseOutline } from "../voiceCommands";
 
-export default function RightPanel({ model, outline = [], editorRef }) {
+export default function RightPanel({ model, editorRef }) {
   const [content, setContent] = useState("");
+  const outline = useMemo(() => parseOutline(content), [content]);
 
   useEffect(() => {
     if (!model) {
@@ -30,7 +32,7 @@ export default function RightPanel({ model, outline = [], editorRef }) {
   };
 
   return (
-    <aside className="w-56 bg-[#1e1e1e] border-l border-gray-700 flex flex-col">
+    <aside aria-label="Outline and preview" className="w-56 bg-[#1e1e1e] border-l border-gray-700 flex flex-col">
 
       {outline.length > 0 && (
         <div className="p-3 border-b border-gray-700">
@@ -48,6 +50,7 @@ export default function RightPanel({ model, outline = [], editorRef }) {
                   <span className="text-gray-500 mr-1">
                     {item.type}
                   </span>
+                  {" "}
                   {item.name}
                 </button>
               </li>
@@ -58,7 +61,7 @@ export default function RightPanel({ model, outline = [], editorRef }) {
 
       <div className="flex-1 p-3 overflow-auto">
         <div className="bg-[#111] border border-gray-700 rounded-lg p-3 shadow-inner">
-          <pre className="text-[9px] leading-tight text-gray-400 whitespace-pre-wrap font-mono">
+          <pre aria-hidden="true" className="text-[9px] leading-tight text-gray-400 whitespace-pre-wrap font-mono">
             {content}
           </pre>
         </div>

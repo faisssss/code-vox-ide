@@ -1,90 +1,69 @@
-# Voice-Assisted IDE
+# CodeVox: Voice-Assisted IDE
 
-## Overview
+CodeVox helps visually impaired programmers write, edit and run Python by voice. You speak, and Google Gemini writes the code or your words are typed into the editor. A small local server runs the program, and results are read aloud.
 
-Voice-Assisted IDE is an accessibility-focused development environment designed to help visually impaired programmers write and manage code using voice commands. The system converts spoken instructions into code through speech recognition and natural language processing (NLP), enabling a more inclusive coding experience.
+## Setup
 
-## Problem Statement
+You need Python 3.10+, Node.js 20+ and Chrome or Edge (voice control and folder access need them).
 
-Traditional Integrated Development Environments (IDEs) heavily depend on visual interfaces and keyboard interactions, creating challenges for visually impaired developers. This project addresses that problem by introducing a voice-driven coding platform that improves accessibility and productivity.
+**1. Get a Gemini API key** at <https://aistudio.google.com/apikey>.
 
-## Features
-
-* Voice-to-Code Conversion
-* Speech Recognition using Web Speech API
-* NLP-Based Command Processing
-* Real-Time Code Generation
-* Accessibility-Oriented User Interface
-* Voice Feedback Support
-* Responsive Design
-* Secure Backend APIs
-
-## System Architecture
-
-1. User speaks a coding command.
-2. Speech Recognition converts voice into text.
-3. NLP engine analyzes the command.
-4. Backend generates the corresponding code snippet.
-5. Generated code is inserted into the editor.
-6. Audio or visual feedback is provided to the user.
-
-## Tech Stack
-
-### Frontend
-
-* React.js
-* Tailwind CSS
-* Vite
-* Web Speech API
-
-### Backend
-
-* Node.js
-* Express.js
-* Python
-* REST APIs
-
-### NLP & AI
-
-* spaCy
-* Natural Language Processing
-
-### Database
-
-* MongoDB / Supabase
-
-### Version Control
-
-* Git
-* GitHub
-
-## Key Accessibility Features
-
-* Voice-Based Navigation
-* Screen Reader Compatibility
-* ARIA Labels
-* Keyboard Accessibility
-* High Contrast Interface
-* Inclusive User Experience Design
-
-## Future Enhancements
-
-* AI-Powered Code Suggestions
-* Multi-Language Programming Support
-* Voice-Based Debugging
-* Cloud Workspace Integration
-* Personalized Voice Profiles
-
-## Installation
+**2. Start the backend** in one terminal:
 
 ```bash
-git clone https://github.com/yourusername/voice-assisted-ide.git
-cd voice-assisted-ide
+cd backend
+python -m venv venv
+venv\Scripts\activate        # macOS/Linux: source venv/bin/activate
+pip install -r requirements.txt
+copy .env.example .env       # macOS/Linux: cp .env.example .env
+# Now put your key in backend/.env
+python app.py
+```
+
+**3. Start the frontend** in a second terminal:
+
+```bash
+cd frontend
 npm install
 npm run dev
 ```
-Authors
-Janvi Prince
-Mohammed Faisal
-Jeevan George
-Jesse Jomon
+
+**4. Open** <http://localhost:5173>. The backend only accepts requests from this address.
+
+## Using it
+
+Press **Alt+V** or the mic button and speak. With **Hands-free mode** on, the mic keeps listening.
+
+| Say | What happens |
+| --- | --- |
+| `run` / `run the code` | Runs the current file |
+| `stop` / `stop the program` | Stops the running program |
+| `undo` | Undoes the last change |
+| `open file main dot py` | Opens a file from the open folder |
+
+**Full program mode:** anything else is sent to Gemini, and the code is added to the end of the file. Say `undo` to remove it.
+
+**Line-by-line mode:** your words are typed, with symbols converted (`x equals True` becomes `x = True`). You can also say `cursor left/right/up/down`, `backspace`, `new line`, `go to line 5`, `delete line 5`, or `replace line 5 with x equals 1`.
+
+Opening a folder needs a click or keyboard press because the browser requires it. Edits are saved automatically. Untitled tabs are not saved to disk.
+
+## Limits
+
+- Programs run in a temporary folder, not the folder you opened, so they cannot read files or import modules next to them.
+- Programs run with your full user permissions. Only run code you trust.
+- This is built for one person on their own computer. Do not host it for others.
+
+## Tests
+
+```bash
+cd backend && python -m unittest test_app
+cd frontend && npm test
+```
+
+## Tech stack
+
+React, Vite, Tailwind CSS, Monaco Editor and the Web Speech API on the frontend. Python, Flask and the Google Gen AI SDK on the backend.
+
+## Authors
+
+Janvi Prince, Mohammed Faisal, Jeevan George, Jesse Jomon
