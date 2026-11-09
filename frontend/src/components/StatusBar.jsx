@@ -1,7 +1,7 @@
 import React from "react";
-import { FiPlay, FiMic } from "react-icons/fi";
+import { FiPlay, FiSquare } from "react-icons/fi";
 
-export default function StatusBar({ onRun }) {
+export default function StatusBar({ onRun, onStop }) {
   return (
     <div className="h-8 bg-[#1a1a1a] border-t border-[#2b2b2b] text-gray-300 flex items-center justify-between px-4 text-xs">
       <div className="flex items-center gap-2">
@@ -10,10 +10,16 @@ export default function StatusBar({ onRun }) {
 
       <div className="flex gap-2">
         <button
+          onClick={onStop}
+          className="flex items-center gap-1 bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded"
+        >
+          <FiSquare aria-hidden="true" /> Stop
+        </button>
+        <button
           onClick={onRun}
           className="flex items-center gap-1 bg-[#0e639c] hover:bg-[#1177c2] text-white px-2 py-1 rounded"
         >
-          <FiPlay /> Run
+          <FiPlay aria-hidden="true" /> Run
         </button>
       </div>
     </div>

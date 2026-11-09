@@ -1,5 +1,5 @@
 // src/components/Sidebar.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   FiFolder,
   FiFile,
@@ -11,23 +11,67 @@ import {
 } from "react-icons/fi";
 import { VscFolderOpened } from "react-icons/vsc";
 
-export default function Sidebar({ onOpenFile, onRun }) {
+// Huge generated folders would make opening a project take minutes.
+const SKIPPED_FOLDERS = new Set([
+  "node_modules", ".git", "__pycache__", ".venv", "venv", "dist",
+]);
+
+async function readDirectory(dirHandle, basePath) {
+  const entries = [];
+
+  for await (const entry of dirHandle.values()) {
+    const fullPath = basePath
+      ? `${basePath}/${entry.name}`
+      : entry.name;
+
+    if (entry.kind === "directory") {
+      if (SKIPPED_FOLDERS.has(entry.name)) continue;
+      const children = await readDirectory(entry, fullPath);
+      entries.push({
+        name: entry.name,
+        type: "folder",
+        path: fullPath,
+        handle: entry,
+        children,
+      });
+    } else {
+      entries.push({
+        name: entry.name,
+        type: "file",
+        path: fullPath,
+        handle: entry,
+      });
+    }
+  }
+
+  return entries.sort((a, b) => {
+    if (a.type === b.type) return a.name.localeCompare(b.name);
+    return a.type === "folder" ? -1 : 1;
+  });
+}
+
+export default function Sidebar({ onOpenFile, onRun, onFolderChanged, onTreeChanged }) {
   const [tree, setTree] = useState([]);
   const [expanded, setExpanded] = useState({});
   const [rootHandle, setRootHandle] = useState(null);
   const [selectedFolder, setSelectedFolder] = useState(null);
 
+  const loadTree = async (root) => {
+    const structure = await readDirectory(root, "");
+    setTree(structure);
+    onTreeChanged?.(structure);
+  };
+
   const openWorkspace = async (externalRoot) => {
     try {
-      const root = externalRoot || await window.showDirectoryPicker();
+      const root = externalRoot || await window.showDirectoryPicker({ mode: "readwrite" });
       if (!root) return;
 
+      await onFolderChanged?.();
       setRootHandle(root);
       setSelectedFolder(root);
-
-      const structure = await readDirectory(root, "");
-      setTree(structure);
       setExpanded({});
+      await loadTree(root);
     } catch (err) {
       if (err.name !== "AbortError") {
         console.error(err);
@@ -35,52 +79,25 @@ export default function Sidebar({ onOpenFile, onRun }) {
     }
   };
 
+  // The listener always calls the newest openWorkspace, without re-subscribing.
+  const openWorkspaceRef = useRef(openWorkspace);
   useEffect(() => {
-    const listener = (e) => openWorkspace(e.detail);
+    openWorkspaceRef.current = openWorkspace;
+  });
+
+  useEffect(() => {
+    const listener = (e) => openWorkspaceRef.current(e.detail);
     window.addEventListener("codevox-open-folder", listener);
     return () =>
       window.removeEventListener("codevox-open-folder", listener);
   }, []);
-
-  const readDirectory = async (dirHandle, basePath) => {
-    const entries = [];
-
-    for await (const entry of dirHandle.values()) {
-      const fullPath = basePath
-        ? `${basePath}/${entry.name}`
-        : entry.name;
-
-      if (entry.kind === "directory") {
-        const children = await readDirectory(entry, fullPath);
-        entries.push({
-          name: entry.name,
-          type: "folder",
-          path: fullPath,
-          handle: entry,
-          children,
-        });
-      } else {
-        entries.push({
-          name: entry.name,
-          type: "file",
-          path: fullPath,
-          handle: entry,
-        });
-      }
-    }
-
-    return entries.sort((a, b) => {
-      if (a.type === b.type) return a.name.localeCompare(b.name);
-      return a.type === "folder" ? -1 : 1;
-    });
-  };
 
   const createFile = async () => {
     if (!selectedFolder) return;
     const name = prompt("File name:");
     if (!name) return;
     await selectedFolder.getFileHandle(name, { create: true });
-    openWorkspace(rootHandle);
+    await loadTree(rootHandle);
   };
 
   const createFolder = async () => {
@@ -88,7 +105,7 @@ export default function Sidebar({ onOpenFile, onRun }) {
     const name = prompt("Folder name:");
     if (!name) return;
     await selectedFolder.getDirectoryHandle(name, { create: true });
-    openWorkspace(rootHandle);
+    await loadTree(rootHandle);
   };
 
   const toggle = (path) =>
@@ -104,17 +121,18 @@ export default function Sidebar({ onOpenFile, onRun }) {
 
         return (
           <div key={node.path}>
-            <div
-              className="flex items-center gap-2 px-2 py-1 hover:bg-[#2a2a2a] cursor-pointer"
+            <button
+              aria-expanded={!!isOpen}
+              className="w-full bg-transparent text-left flex items-center gap-2 px-2 py-1 hover:bg-[#2a2a2a] cursor-pointer"
               onClick={() => {
                 toggle(node.path);
                 setSelectedFolder(node.handle);
               }}
             >
-              {isOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-              <FiFolder size={14} className="text-yellow-400" />
+              {isOpen ? <FiChevronDown aria-hidden="true" size={14} /> : <FiChevronRight aria-hidden="true" size={14} />}
+              <FiFolder aria-hidden="true" size={14} className="text-yellow-400" />
               {node.name}
-            </div>
+            </button>
 
             {isOpen && node.children && (
               <div className="ml-4">
@@ -126,33 +144,33 @@ export default function Sidebar({ onOpenFile, onRun }) {
       }
 
       return (
-        <div
+        <button
           key={node.path}
-          className="flex items-center gap-2 px-4 py-1 hover:bg-[#2a2a2a] cursor-pointer"
+          className="w-full bg-transparent text-left flex items-center gap-2 px-4 py-1 hover:bg-[#2a2a2a] cursor-pointer"
           onClick={() => onOpenFile(node.path, node.handle)}
         >
-          <FiFile size={14} className="text-blue-400" />
+          <FiFile aria-hidden="true" size={14} className="text-blue-400" />
           {node.name}
-        </div>
+        </button>
       );
     });
 
   return (
-    <div className="w-64 bg-[#181818] border-r border-[#2a2a2a] flex flex-col">
+    <nav aria-label="File explorer" className="w-64 bg-[#181818] border-r border-[#2a2a2a] flex flex-col">
       <div className="px-3 py-2 flex justify-between border-b border-[#2a2a2a]">
         <span className="text-sm font-semibold text-gray-200">
           Explorer
         </span>
 
         <div className="flex gap-2">
-          <button onClick={() => openWorkspace()} title="Open Folder">
-            <VscFolderOpened size={16} />
+          <button onClick={() => openWorkspace()} title="Open Folder" aria-label="Open Folder">
+            <VscFolderOpened aria-hidden="true" size={16} />
           </button>
-          <button onClick={createFolder} title="New Folder">
-            <FiFolderPlus size={16} />
+          <button onClick={createFolder} title="New Folder" aria-label="New Folder">
+            <FiFolderPlus aria-hidden="true" size={16} />
           </button>
-          <button onClick={createFile} title="New File">
-            <FiFilePlus size={16} />
+          <button onClick={createFile} title="New File" aria-label="New File">
+            <FiFilePlus aria-hidden="true" size={16} />
           </button>
         </div>
       </div>
@@ -172,10 +190,10 @@ export default function Sidebar({ onOpenFile, onRun }) {
           onClick={onRun}
           className="w-full bg-[#0e639c] text-white py-2 rounded flex items-center justify-center gap-2"
         >
-          <FiPlay size={14} />
+          <FiPlay aria-hidden="true" size={14} />
           Run
         </button>
       </div>
-    </div>
+    </nav>
   );
 }

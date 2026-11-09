@@ -14,6 +14,8 @@ export default function Welcome({ onOpenFolder }) {
           Voice-first coding environment.
           <br />
           Speak, edit, and run programs hands-free or with keyboard.
+          <br />
+          Press Alt+V anywhere to use the microphone.
         </p>
 
         <div className="flex justify-center gap-3">
@@ -21,16 +23,14 @@ export default function Welcome({ onOpenFolder }) {
             className="flex items-center gap-2 bg-[#0e639c] hover:bg-[#1177c2] px-4 py-2 rounded text-white"
             onClick={onOpenFolder}
           >
-            <FiFolder /> Open Folder
+            <FiFolder aria-hidden="true" /> Open Folder
           </button>
 
           <button
             className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-white"
-            onClick={() =>
-              alert("Use the mic button at bottom right to start voice mode.")
-            }
+            onClick={() => window.dispatchEvent(new Event("codevox-toggle-mic"))}
           >
-            <FiMic /> Start Voice Mode
+            <FiMic aria-hidden="true" /> Start Voice Mode
           </button>
         </div>
       </div>
